@@ -578,7 +578,7 @@ footer .brand-sign { font-weight: 900; color: var(--gold-light); letter-spacing:
 <div class="catalog-container">
  <div class="section-title">
  <span>Catálogo Profissional</span>
- <span style="font-size:11px; color:var(--text-muted);" id="product-count-label">Conectando à nuvem Google...</span>
+ <span style="font-size:11px; color:var(--text-muted);" id="product-count-label">Carregando catálogo...</span>
  </div>
  <div class="products-grid" id="products-grid"></div>
 </div>
@@ -772,6 +772,8 @@ URL DA IMPLANTAÇÃO DO GOOGLE APPS SCRIPT
 ========================================================
 */
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwuT_N-xr52xGIfaZVraxOcXMqyCABFOhAoWu2_jjHARoruwVON93HHOXU6P8AbjlRrzA/exec';
+const CACHE_KEY_PROD = 'jr_cosmeticos_prod_cache';
+const CACHE_KEY_BANNERS = 'jr_cosmeticos_banner_cache';
 
 /* BANCO DE DADOS EM MEMÓRIA */
 let productsDatabase = [];
@@ -790,7 +792,7 @@ function isProductOutOfStock(p) {
 /* SERVICE WORKER (PWA) */
 if ('serviceWorker' in navigator) {
  const swCode = `
- const CACHE_NAME = 'jr-cosm-v100';
+ const CACHE_NAME = 'jr-cosm-v101';
  self.addEventListener('install', e => self.skipWaiting());
  self.addEventListener('activate', e => self.clients.claim());
  self.addEventListener('fetch', e => {
@@ -888,10 +890,31 @@ function convertFileToBase64(fileInput, targetInputId) {
  }
 }
 
-/* CARREGAR DADOS DA NUVEM */
+/* CARREGAR DADOS DA NUVEM (COM SUPORTE A CACHE LOCAL PARA ZERAR O DELAY) */
 async function loadCloudData() {
  const countLabel = document.getElementById('product-count-label');
- if (countLabel) countLabel.innerText = "Sincronizando com a Planilha Google...";
+ 
+ // 1. TENTA CARREGAR INSTANTANEAMENTE DO CACHE DO NAVEGADOR
+ const cachedProducts = localStorage.getItem(CACHE_KEY_PROD);
+ const cachedBanners = localStorage.getItem(CACHE_KEY_BANNERS);
+
+ if (cachedProducts) {
+ try {
+ productsDatabase = JSON.parse(cachedProducts);
+ } catch(e) { productsDatabase = []; }
+ }
+ if (cachedBanners) {
+ try {
+ slidesDatabase = JSON.parse(cachedBanners);
+ } catch(e) { slidesDatabase = []; }
+ }
+
+ // Renderiza imediatamente com os dados locais salvos
+ renderProducts(currentCategory);
+ renderSlider();
+ renderAdminProductsList();
+ renderAdminBannersList();
+
  try {
  const res = await fetch(GAS_URL + '?t=' + Date.now(), {
  method: 'GET',
@@ -903,6 +926,12 @@ async function loadCloudData() {
  if (result.status === 'success') {
  productsDatabase = result.products || [];
  slidesDatabase = result.banners || [];
+
+ // Salva no cache local para as próximas visitas abrirem instantaneamente
+ localStorage.setItem(CACHE_KEY_PROD, JSON.stringify(productsDatabase));
+ localStorage.setItem(CACHE_KEY_BANNERS, JSON.stringify(slidesDatabase));
+
+ // Atualiza a tela com os dados mais recentes da nuvem
  renderProducts(currentCategory);
  renderSlider();
  renderAdminProductsList();
@@ -911,9 +940,10 @@ async function loadCloudData() {
  throw new Error(result.message || 'Erro retornado pela planilha');
  }
  } catch (err) {
- console.error('Erro ao conectar na nuvem:', err);
- if (countLabel) countLabel.innerText = "Erro ao conectar à Planilha!";
- showToast("Aviso: Falha ao sincronizar com a Planilha Google", true);
+ console.error('Aviso ao sincronizar dados em segundo plano:', err);
+ if (productsDatabase.length === 0 && countLabel) {
+ countLabel.innerText = "Modo Offline / Erro de Conexão";
+ }
  }
 }
 
@@ -1557,7 +1587,6 @@ async function deleteBanner(id) {
 
 /* INICIALIZAÇÃO */
 window.onload = async () => {
- renderProducts('todos');
  await loadCloudData();
 };
 </script>
